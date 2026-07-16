@@ -13,6 +13,7 @@ FastAPI session API
   +--> memory consent flag
   +--> approval request queue
   +--> realtime and memory contract views
+  +--> short-lived browser room tokens
   +--> future realtime/model adapters
 ```
 
@@ -20,8 +21,8 @@ FastAPI session API
 
 | Component | Responsibility |
 | --- | --- |
-| `apps/web` | Provides the operator-facing chat console, memory consent control, and approval queue. |
-| `services/api` | Owns session state, message append flow, approval decisions, and read-only contract descriptions. |
+| `apps/web` | Provides the operator-facing chat console, memory consent control, approval queue, and browser microphone room shell. |
+| `services/api` | Owns session state, message append flow, approval decisions, read-only contract descriptions, and short-lived room token minting. |
 | `CONTRACTS.md` | Defines the realtime room and memory rules that provider/storage integrations must satisfy. |
 | `scripts/check-workspace.mjs` | Verifies the scaffold and expected contract markers without requiring external services. |
 
@@ -31,15 +32,19 @@ The initial API stores sessions, messages, and approval requests in process memo
 
 ## Realtime Boundary
 
-Voice/video is not connected to a provider yet. The project now exposes a contract-only realtime room view for each session so the next slice has a stable target. The expected next shape is:
+Voice/video is not connected to a provider yet. The project exposes a realtime room contract and a provider-neutral token endpoint for each session so a browser can prove microphone permission and room readiness before a managed room or model SDK is added.
 
 1. Web console creates a session.
-2. API mints a short-lived realtime session token for `personabridge:{session_id}`.
-3. Browser joins a WebRTC or managed realtime room.
-4. Final transcript events append to the same message lifecycle.
-5. Audio/model events still pass through the approval and memory boundaries before any sensitive action.
+2. Browser requests microphone access through a user action.
+3. API mints a five-minute opaque browser join token for `personabridge:{session_id}` and marks the session `voice_ready`.
+4. Browser holds the local audio stream and token as the voice shell state.
+5. A future adapter exchanges that token for a real WebRTC, LiveKit, or model-provider room join.
+6. Final transcript events append to the same message lifecycle.
+7. Audio/model events still pass through the approval and memory boundaries before any sensitive action.
 
 The contract deliberately separates streaming deltas from final transcript messages. The UI can render assistant deltas for responsiveness, but the durable message boundary should only store final ordered messages.
+
+The current token is opaque and stored only in process memory. It is a local development boundary, not authentication infrastructure. A production provider adapter should replace it with a signed or provider-issued credential while keeping the same session, approval, and memory semantics.
 
 ## Memory Boundary
 

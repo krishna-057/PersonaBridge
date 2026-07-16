@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -68,13 +69,29 @@ class ApprovalDecisionRequest(BaseModel):
 class RealtimeContractResponse(BaseModel):
     session_id: UUID
     room_id: str
-    status: Literal["contract_only"]
+    status: Literal["token_ready"]
     transport: Literal["webrtc_or_managed_realtime"]
-    token_endpoint: str | None
+    token_endpoint: str
     client_events: list[str]
     server_events: list[str]
     approval_boundary: str
     memory_boundary: str
+
+
+class RealtimeTokenRequest(BaseModel):
+    device_label: str | None = Field(default=None, max_length=120)
+
+
+class RealtimeTokenResponse(BaseModel):
+    session_id: UUID
+    room_id: str
+    token: str
+    token_type: Literal["opaque_browser_join"]
+    transport: Literal["browser_webrtc_shell"]
+    participant_id: str
+    expires_at: datetime
+    issued_at: datetime
+    device_label: str | None = None
 
 
 class MemoryContractResponse(BaseModel):
@@ -91,6 +108,7 @@ class MemoryContractResponse(BaseModel):
 sessions: dict[UUID, SessionResponse] = {}
 messages: dict[UUID, list[MessageResponse]] = {}
 approval_requests: dict[UUID, ApprovalRequestResponse] = {}
+realtime_tokens: dict[str, RealtimeTokenResponse] = {}
 
 
 def now_utc() -> datetime:
@@ -102,6 +120,17 @@ def require_session(session_id: UUID) -> SessionResponse:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
     return session
+
+
+def store_session(session: SessionResponse) -> SessionResponse:
+    sessions[session.session_id] = session
+    return session
+
+
+def update_session_status(session: SessionResponse, status: Literal["chat_ready", "voice_ready", "ended"]) -> SessionResponse:
+    if hasattr(session, "model_copy"):
+        return store_session(session.model_copy(update={"status": status}))
+    return store_session(session.copy(update={"status": status}))
 
 
 def append_message(
@@ -157,9 +186,9 @@ def realtime_contract_for(session_id: UUID) -> RealtimeContractResponse:
     return RealtimeContractResponse(
         session_id=session_id,
         room_id=f"personabridge:{session_id}",
-        status="contract_only",
+        status="token_ready",
         transport="webrtc_or_managed_realtime",
-        token_endpoint=None,
+        token_endpoint=f"/api/sessions/{session_id}/realtime-token",
         client_events=[
             "room.join.requested",
             "audio.input.started",
@@ -176,6 +205,25 @@ def realtime_contract_for(session_id: UUID) -> RealtimeContractResponse:
         approval_boundary="Realtime actions reuse approval request resources before any external tool executes.",
         memory_boundary="Raw audio is not remembered; only final text or approved summaries can become memory candidates.",
     )
+
+
+def mint_realtime_token(session: SessionResponse, device_label: str | None) -> RealtimeTokenResponse:
+    issued_at = now_utc()
+    token = secrets.token_urlsafe(32)
+    response = RealtimeTokenResponse(
+        session_id=session.session_id,
+        room_id=f"personabridge:{session.session_id}",
+        token=token,
+        token_type="opaque_browser_join",
+        transport="browser_webrtc_shell",
+        participant_id=f"browser:{uuid4()}",
+        expires_at=issued_at + timedelta(minutes=5),
+        issued_at=issued_at,
+        device_label=device_label,
+    )
+    realtime_tokens[token] = response
+    update_session_status(session, "voice_ready")
+    return response
 
 
 def memory_contract_for(session: SessionResponse) -> MemoryContractResponse:
@@ -237,6 +285,14 @@ def get_session(session_id: UUID) -> SessionResponse:
 def get_realtime_contract(session_id: UUID) -> RealtimeContractResponse:
     require_session(session_id)
     return realtime_contract_for(session_id)
+
+
+@app.post("/api/sessions/{session_id}/realtime-token", response_model=RealtimeTokenResponse)
+def create_realtime_token(session_id: UUID, payload: RealtimeTokenRequest) -> RealtimeTokenResponse:
+    session = require_session(session_id)
+    if session.status == "ended":
+        raise HTTPException(status_code=409, detail="Session has ended.")
+    return mint_realtime_token(session, payload.device_label)
 
 
 @app.get("/api/sessions/{session_id}/memory-contract", response_model=MemoryContractResponse)

@@ -4,14 +4,14 @@ PersonaBridge is a personal AI partner that can chat, join a voice/video room, r
 
 ## Current Slice
 
-The first implemented slice is a local full-stack scaffold:
+The current implemented slice is a local full-stack scaffold with a provider-neutral voice room shell:
 
-- `apps/web`: Next.js console for starting a personal session, sending chat messages, toggling memory consent, and reviewing approval requests.
-- `services/api`: FastAPI boundary for sessions, messages, approval decisions, and read-only realtime/memory contracts.
+- `apps/web`: Next.js console for starting a personal session, sending chat messages, toggling memory consent, reviewing approval requests, and running a browser voice shell that requests microphone access and mints a scoped room token.
+- `services/api`: FastAPI boundary for sessions, messages, approval decisions, realtime token minting, and read-only realtime/memory contracts.
 - `CONTRACTS.md`: The documented realtime room and memory promotion rules that future provider integrations must satisfy.
 - `scripts/check-workspace.mjs`: dependency-light scaffold validation for the required files and API contract markers.
 
-The assistant response is intentionally stubbed. It proves the user-facing workflow, permission boundary, and realtime/memory contract shape before adding external model credentials, realtime media, or durable memory.
+The assistant response is intentionally stubbed. It proves the user-facing workflow, permission boundary, and realtime/memory contract shape before adding external model credentials, managed realtime media, or durable memory.
 
 ## Architecture Focus
 
@@ -53,11 +53,12 @@ The web app defaults to `http://localhost:3200` and the API defaults to `http://
 | List approvals | `GET /api/sessions/{session_id}/approvals` | Shows pending external-action requests. |
 | Decide approval | `POST /api/approvals/{request_id}/decision` | Records approve/reject before any future tool execution. |
 | Read realtime contract | `GET /api/sessions/{session_id}/realtime-contract` | Shows the room, event, token, approval, and memory rules for a future voice session. |
+| Mint realtime room token | `POST /api/sessions/{session_id}/realtime-token` | Issues a five-minute browser join token and promotes the session to `voice_ready`. |
 | Read memory contract | `GET /api/sessions/{session_id}/memory-contract` | Shows consent-derived memory capture mode, allowed sources, excluded sources, and storage target. |
 
 ## Intentional Deferrals
 
-- Realtime voice and video are not connected until a short-lived room token endpoint is implemented against the documented contract.
+- Realtime provider integration is not connected yet; the browser shell stops at microphone capture and a short-lived API-minted room token.
 - OpenAI Realtime API credentials are not required for the scaffold.
 - Durable memory and vector search are deferred until the memory schema and deletion controls are implemented.
 - Approval decisions are recorded, but no external tools execute yet.

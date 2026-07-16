@@ -15,6 +15,22 @@ Every realtime room belongs to one PersonaBridge session.
 | Session state | `chat_ready` before room token minting, `voice_ready` after a browser can join, `ended` after teardown. |
 | Event ordering | Transcript and approval events must be append-only per session. Audio deltas may be streaming, but final transcript messages must preserve session order. |
 
+## Room Token Slice
+
+The first implementation mints a provider-neutral browser join token instead of integrating a realtime SDK immediately.
+
+| Field | Current Rule |
+| --- | --- |
+| Endpoint | `POST /api/sessions/{session_id}/realtime-token` |
+| Request | Optional `device_label` captured from the browser microphone track. |
+| Response token | Opaque `opaque_browser_join` value scoped to one session and one participant. |
+| Expiry | Five minutes after issue time. |
+| Session effect | Updates the session status from `chat_ready` to `voice_ready`. |
+| Browser shell | Requests microphone access only from a user action, keeps tracks local, and stops them on leave/new session. |
+| Provider adapter | Deferred. A future adapter should exchange or replace this token with a WebRTC, LiveKit, or model-provider credential. |
+
+This token is a local architecture boundary, not production authentication. The important constraint is that realtime room access is minted by the API after session validation and before any audio/model provider is joined.
+
 ### Client To Server Events
 
 | Event | Payload | Rule |

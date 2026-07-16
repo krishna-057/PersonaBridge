@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type SessionStatus = "chat_ready" | "voice_ready" | "ended";
 type MessageRole = "user" | "assistant" | "system";
 type ApprovalStatus = "pending" | "approved" | "rejected";
+type VoiceState = "idle" | "joining" | "ready" | "error";
 
 type SessionResponse = {
   session_id: string;
@@ -36,13 +37,25 @@ type ApprovalRequest = {
 type RealtimeContract = {
   session_id: string;
   room_id: string;
-  status: "contract_only";
+  status: "token_ready";
   transport: "webrtc_or_managed_realtime";
-  token_endpoint: string | null;
+  token_endpoint: string;
   client_events: string[];
   server_events: string[];
   approval_boundary: string;
   memory_boundary: string;
+};
+
+type RealtimeToken = {
+  session_id: string;
+  room_id: string;
+  token: string;
+  token_type: "opaque_browser_join";
+  transport: "browser_webrtc_shell";
+  participant_id: string;
+  expires_at: string;
+  issued_at: string;
+  device_label: string | null;
 };
 
 type MemoryContract = {
@@ -88,11 +101,14 @@ export default function PersonaBridgeHome() {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [realtimeContract, setRealtimeContract] = useState<RealtimeContract | null>(null);
   const [memoryContract, setMemoryContract] = useState<MemoryContract | null>(null);
+  const [roomToken, setRoomToken] = useState<RealtimeToken | null>(null);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [draft, setDraft] = useState("Help me plan a focused architecture study block.");
   const [displayName, setDisplayName] = useState("Krishna");
   const [memoryEnabled, setMemoryEnabled] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Create a session to start the assistant console.");
   const [isSending, setIsSending] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
 
   const pendingApprovals = useMemo(
     () => approvals.filter((approval) => approval.status === "pending"),
@@ -100,6 +116,11 @@ export default function PersonaBridgeHome() {
   );
 
   const sessionId = session?.session_id;
+
+  const stopLocalAudio = useCallback(() => {
+    localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current = null;
+  }, []);
 
   async function refreshContracts(targetSessionId: string) {
     const [nextRealtimeContract, nextMemoryContract] = await Promise.all([
@@ -121,6 +142,9 @@ export default function PersonaBridgeHome() {
     setApprovals([]);
     setRealtimeContract(null);
     setMemoryContract(null);
+    setRoomToken(null);
+    setVoiceState("idle");
+    stopLocalAudio();
 
     try {
       const created = await requestJson<SessionResponse>("/api/sessions", {
@@ -140,6 +164,48 @@ export default function PersonaBridgeHome() {
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Could not create a session.");
     }
+  }
+
+  async function startVoiceRoom() {
+    if (!sessionId || !realtimeContract) {
+      return;
+    }
+
+    setVoiceState("joining");
+    setStatusMessage("Requesting microphone and room token...");
+    stopLocalAudio();
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("This browser does not expose microphone capture.");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = stream;
+      const audioTrack = stream.getAudioTracks()[0];
+      const deviceLabel = audioTrack?.label || "browser microphone";
+      const token = await requestJson<RealtimeToken>(realtimeContract.token_endpoint, {
+        method: "POST",
+        body: JSON.stringify({ device_label: deviceLabel })
+      });
+      const nextSession = await requestJson<SessionResponse>(`/api/sessions/${sessionId}`);
+      setRoomToken(token);
+      setSession(nextSession);
+      setVoiceState("ready");
+      setStatusMessage("Voice shell ready with a scoped room token.");
+    } catch (error) {
+      stopLocalAudio();
+      setRoomToken(null);
+      setVoiceState("error");
+      setStatusMessage(error instanceof Error ? error.message : "Could not start the voice shell.");
+    }
+  }
+
+  function leaveVoiceRoom() {
+    stopLocalAudio();
+    setRoomToken(null);
+    setVoiceState("idle");
+    setStatusMessage("Local microphone stopped. The session remains available for chat.");
   }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -198,6 +264,10 @@ export default function PersonaBridgeHome() {
 
     return () => window.clearInterval(interval);
   }, [refreshApprovals, sessionId]);
+
+  useEffect(() => {
+    return () => stopLocalAudio();
+  }, [stopLocalAudio]);
 
   return (
     <main className="workspace-shell">
@@ -295,14 +365,32 @@ export default function PersonaBridgeHome() {
         <section className="panel-block">
           <div className="panel-header">
             <span>Realtime</span>
-            <strong>{realtimeContract?.status.replace("_", " ") ?? "Not started"}</strong>
+            <strong>{voiceState === "ready" ? "Voice ready" : realtimeContract?.status.replace("_", " ") ?? "Not started"}</strong>
           </div>
           <p>{realtimeContract?.memory_boundary ?? "Voice/video joins the same session boundary after the room contract exists."}</p>
+          <div className="voice-shell" data-state={voiceState}>
+            <div>
+              <span>Voice shell</span>
+              <strong>{voiceState}</strong>
+            </div>
+            <div className="voice-actions">
+              <button
+                type="button"
+                onClick={startVoiceRoom}
+                disabled={!sessionId || !realtimeContract || voiceState === "joining" || voiceState === "ready"}
+              >
+                {voiceState === "joining" ? "Joining" : "Join Voice"}
+              </button>
+              <button type="button" onClick={leaveVoiceRoom} disabled={voiceState !== "ready"}>
+                Leave
+              </button>
+            </div>
+          </div>
           {realtimeContract ? (
             <dl className="contract-list">
               <div>
                 <dt>Room</dt>
-                <dd>{realtimeContract.room_id}</dd>
+                <dd>{roomToken?.room_id ?? realtimeContract.room_id}</dd>
               </div>
               <div>
                 <dt>Events</dt>
@@ -312,7 +400,11 @@ export default function PersonaBridgeHome() {
               </div>
               <div>
                 <dt>Token</dt>
-                <dd>{realtimeContract.token_endpoint ?? "deferred"}</dd>
+                <dd>{roomToken ? `expires ${formatClock(roomToken.expires_at)}` : realtimeContract.token_endpoint}</dd>
+              </div>
+              <div>
+                <dt>Device</dt>
+                <dd>{roomToken?.device_label ?? "not joined"}</dd>
               </div>
             </dl>
           ) : null}

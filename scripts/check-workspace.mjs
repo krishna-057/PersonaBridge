@@ -29,9 +29,11 @@ if (
   !appPage.includes("/api/sessions") ||
   !appPage.includes("/approvals") ||
   !appPage.includes("/realtime-contract") ||
-  !appPage.includes("/memory-contract")
+  !appPage.includes("/memory-contract") ||
+  !appPage.includes("getUserMedia") ||
+  !appPage.includes("Join Voice")
 ) {
-  throw new Error("Web app must exercise session, approval, realtime, and memory contract boundaries.");
+  throw new Error("Web app must exercise session, approval, realtime, voice shell, and memory boundaries.");
 }
 
 const apiFile = readFileSync("services/api/app/main.py", "utf8");
@@ -39,14 +41,20 @@ if (
   !apiFile.includes("approval_gate") ||
   !apiFile.includes("/api/sessions/{session_id}/messages") ||
   !apiFile.includes("/api/sessions/{session_id}/realtime-contract") ||
-  !apiFile.includes("/api/sessions/{session_id}/memory-contract")
+  !apiFile.includes("/api/sessions/{session_id}/memory-contract") ||
+  !apiFile.includes("/api/sessions/{session_id}/realtime-token") ||
+  !apiFile.includes("opaque_browser_join")
 ) {
-  throw new Error("API must expose chat messages, approval-gated tool requests, and contract endpoints.");
+  throw new Error("API must expose chat messages, approval-gated tool requests, contracts, and realtime token minting.");
 }
 
 const contractsDoc = readFileSync("CONTRACTS.md", "utf8");
-if (!contractsDoc.includes("Realtime Session Contract") || !contractsDoc.includes("Memory Contract")) {
-  throw new Error("CONTRACTS.md must define realtime and memory contracts.");
+if (
+  !contractsDoc.includes("Realtime Session Contract") ||
+  !contractsDoc.includes("Memory Contract") ||
+  !contractsDoc.includes("Room Token Slice")
+) {
+  throw new Error("CONTRACTS.md must define realtime, room token, and memory contracts.");
 }
 
 console.log("PersonaBridge scaffold check passed.");

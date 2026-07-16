@@ -51,3 +51,25 @@ Rejected alternatives:
 - Add a provider SDK first and discover the contract from the SDK shape. Rejected because vendor events should adapt to the product boundary, not define it.
 - Store memory rows as soon as the checkbox is enabled. Rejected because the project still needs deletion controls and source exclusions before durable recall.
 - Treat realtime transcript deltas as durable messages. Rejected because streaming deltas are noisy and can be revised; only final transcript events should become ordered messages.
+
+## Decision 4: Mint Local Room Tokens Before Adding A Realtime Provider SDK
+
+Status: accepted.
+
+PersonaBridge now adds `POST /api/sessions/{session_id}/realtime-token` and a browser microphone shell before connecting LiveKit, OpenAI Realtime, or any other managed room provider.
+
+Why:
+
+- The browser permission and session-status workflow can be validated locally without external credentials.
+- The API remains the authority that decides whether a browser may join `personabridge:{session_id}`.
+- The session, memory, and approval boundaries stay visible before provider event shapes are introduced.
+
+Tradeoff:
+
+- The current token is an opaque in-memory development token. It is useful for architecture validation, but a production integration should replace it with a signed or provider-issued short-lived credential.
+
+Rejected alternatives:
+
+- Add a managed realtime SDK first. Rejected because provider setup would hide the basic room readiness and browser permission flow.
+- Let the browser invent a room identity without an API token. Rejected because realtime access should stay tied to validated session state.
+- Store microphone audio in the API while testing. Rejected because raw audio is explicitly excluded from the memory contract.
