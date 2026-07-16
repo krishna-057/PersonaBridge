@@ -233,7 +233,8 @@ button:disabled {
 }
 
 .approval-row div:first-child,
-.approval-actions {
+.approval-actions,
+.contract-list div {
   align-items: center;
   display: flex;
   gap: 10px;
@@ -247,6 +248,30 @@ button:disabled {
 
 .approval-actions button:last-child {
   background: var(--rose);
+}
+
+.contract-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.contract-list dt,
+.contract-list dd {
+  margin: 0;
+}
+
+.contract-list dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.contract-list dd {
+  max-width: 210px;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 @media (max-width: 900px) {

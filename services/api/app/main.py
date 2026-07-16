@@ -65,6 +65,29 @@ class ApprovalDecisionRequest(BaseModel):
     decision: Literal["approved", "rejected"]
 
 
+class RealtimeContractResponse(BaseModel):
+    session_id: UUID
+    room_id: str
+    status: Literal["contract_only"]
+    transport: Literal["webrtc_or_managed_realtime"]
+    token_endpoint: str | None
+    client_events: list[str]
+    server_events: list[str]
+    approval_boundary: str
+    memory_boundary: str
+
+
+class MemoryContractResponse(BaseModel):
+    session_id: UUID
+    memory_enabled: bool
+    capture_mode: Literal["disabled", "candidate_review"]
+    allowed_sources: list[str]
+    excluded_sources: list[str]
+    promotion_rule: str
+    deletion_rule: str
+    storage_target: str
+
+
 sessions: dict[UUID, SessionResponse] = {}
 messages: dict[UUID, list[MessageResponse]] = {}
 approval_requests: dict[UUID, ApprovalRequestResponse] = {}
@@ -130,6 +153,56 @@ def assistant_reply(session: SessionResponse, user_content: str, approval_id: UU
     return f"Noted. For now I can help structure the next step and keep the boundary clear. {memory_note}"
 
 
+def realtime_contract_for(session_id: UUID) -> RealtimeContractResponse:
+    return RealtimeContractResponse(
+        session_id=session_id,
+        room_id=f"personabridge:{session_id}",
+        status="contract_only",
+        transport="webrtc_or_managed_realtime",
+        token_endpoint=None,
+        client_events=[
+            "room.join.requested",
+            "audio.input.started",
+            "transcript.user.final",
+            "approval.decision",
+        ],
+        server_events=[
+            "room.token.issued",
+            "transcript.assistant.delta",
+            "approval.requested",
+            "memory.candidate.created",
+            "session.ended",
+        ],
+        approval_boundary="Realtime actions reuse approval request resources before any external tool executes.",
+        memory_boundary="Raw audio is not remembered; only final text or approved summaries can become memory candidates.",
+    )
+
+
+def memory_contract_for(session: SessionResponse) -> MemoryContractResponse:
+    return MemoryContractResponse(
+        session_id=session.session_id,
+        memory_enabled=session.memory_enabled,
+        capture_mode="candidate_review" if session.memory_enabled else "disabled",
+        allowed_sources=[
+            "user-authored final text messages",
+            "assistant summaries from memory-enabled sessions",
+            "approved rememberable tool outcomes",
+        ],
+        excluded_sources=[
+            "raw audio or video frames",
+            "pending or rejected approval requests",
+            "secrets, payment data, authentication codes, and one-time credentials",
+            "browser or device diagnostics",
+        ],
+        promotion_rule=(
+            "Create memory candidates only when consent is enabled; a future worker must classify, redact, "
+            "and attach provenance before durable storage."
+        ),
+        deletion_rule="Delete user-visible memory records and matching embedding rows together.",
+        storage_target="future PostgreSQL memory tables plus optional pgvector embeddings",
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "storage": "memory", "model_runtime": "stubbed"}
@@ -158,6 +231,18 @@ def create_session(payload: CreateSessionRequest) -> SessionResponse:
 @app.get("/api/sessions/{session_id}", response_model=SessionResponse)
 def get_session(session_id: UUID) -> SessionResponse:
     return require_session(session_id)
+
+
+@app.get("/api/sessions/{session_id}/realtime-contract", response_model=RealtimeContractResponse)
+def get_realtime_contract(session_id: UUID) -> RealtimeContractResponse:
+    require_session(session_id)
+    return realtime_contract_for(session_id)
+
+
+@app.get("/api/sessions/{session_id}/memory-contract", response_model=MemoryContractResponse)
+def get_memory_contract(session_id: UUID) -> MemoryContractResponse:
+    session = require_session(session_id)
+    return memory_contract_for(session)
 
 
 @app.get("/api/sessions/{session_id}/messages", response_model=list[MessageResponse])

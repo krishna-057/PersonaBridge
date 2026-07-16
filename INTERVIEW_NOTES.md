@@ -13,6 +13,7 @@ Key topics:
 - Memory consent is captured when a session starts, but durable memory is not implemented yet. In an interview, this is easier to defend than silently storing everything and adding privacy rules later.
 - Approval requests are modeled separately from messages so future tools can require an approved request ID before execution.
 - The assistant response is a stub because the first architecture question is not model quality; it is whether the app has a clear place for chat, memory, and human approval.
+- Realtime and memory contracts are now explicit before provider integration. This lets the team explain how WebRTC/model events map back into ordered messages, approval requests, and memory candidates.
 
 ## Next Scaling Questions
 
@@ -20,3 +21,4 @@ Key topics:
 - How should realtime voice events map back to the same message and approval lifecycle?
 - Should approvals expire, require re-authentication, or include per-tool scopes?
 - What data should be deleted when a user disables memory?
+- Should memory promotion be synchronous on final transcript events, queued through a worker, or fully user-reviewed?

@@ -33,3 +33,21 @@ Why:
 Tradeoff:
 
 - The first implementation uses a lightweight keyword detector and in-memory state. This is acceptable for the scaffold, but it is not a policy engine or durable audit log.
+
+## Decision 3: Define Realtime And Memory Contracts Before Provider Integration
+
+Status: accepted.
+
+PersonaBridge now documents and exposes read-only realtime and memory contracts before adding a realtime provider token minting path, OpenAI Realtime credentials, PostgreSQL memory tables, or pgvector embeddings.
+
+Why:
+
+- Voice must join the same session, transcript, memory, and approval boundaries as text chat.
+- A provider-neutral room contract keeps the next slice free to use plain WebRTC, LiveKit, or a managed realtime model session without rewriting product rules.
+- Memory consent should create at most candidate memories until retention, redaction, provenance, and deletion behavior are implemented.
+
+Rejected alternatives:
+
+- Add a provider SDK first and discover the contract from the SDK shape. Rejected because vendor events should adapt to the product boundary, not define it.
+- Store memory rows as soon as the checkbox is enabled. Rejected because the project still needs deletion controls and source exclusions before durable recall.
+- Treat realtime transcript deltas as durable messages. Rejected because streaming deltas are noisy and can be revised; only final transcript events should become ordered messages.

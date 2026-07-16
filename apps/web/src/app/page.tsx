@@ -33,6 +33,29 @@ type ApprovalRequest = {
   decided_at: string | null;
 };
 
+type RealtimeContract = {
+  session_id: string;
+  room_id: string;
+  status: "contract_only";
+  transport: "webrtc_or_managed_realtime";
+  token_endpoint: string | null;
+  client_events: string[];
+  server_events: string[];
+  approval_boundary: string;
+  memory_boundary: string;
+};
+
+type MemoryContract = {
+  session_id: string;
+  memory_enabled: boolean;
+  capture_mode: "disabled" | "candidate_review";
+  allowed_sources: string[];
+  excluded_sources: string[];
+  promotion_rule: string;
+  deletion_rule: string;
+  storage_target: string;
+};
+
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8200").replace(/\/$/, "");
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -63,6 +86,8 @@ export default function PersonaBridgeHome() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [messages, setMessages] = useState<MessageResponse[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [realtimeContract, setRealtimeContract] = useState<RealtimeContract | null>(null);
+  const [memoryContract, setMemoryContract] = useState<MemoryContract | null>(null);
   const [draft, setDraft] = useState("Help me plan a focused architecture study block.");
   const [displayName, setDisplayName] = useState("Krishna");
   const [memoryEnabled, setMemoryEnabled] = useState(false);
@@ -76,6 +101,15 @@ export default function PersonaBridgeHome() {
 
   const sessionId = session?.session_id;
 
+  async function refreshContracts(targetSessionId: string) {
+    const [nextRealtimeContract, nextMemoryContract] = await Promise.all([
+      requestJson<RealtimeContract>(`/api/sessions/${targetSessionId}/realtime-contract`),
+      requestJson<MemoryContract>(`/api/sessions/${targetSessionId}/memory-contract`)
+    ]);
+    setRealtimeContract(nextRealtimeContract);
+    setMemoryContract(nextMemoryContract);
+  }
+
   const refreshApprovals = useCallback(async (targetSessionId: string) => {
     const nextApprovals = await requestJson<ApprovalRequest[]>(`/api/sessions/${targetSessionId}/approvals`);
     setApprovals(nextApprovals);
@@ -85,6 +119,8 @@ export default function PersonaBridgeHome() {
     setStatusMessage("Creating session...");
     setMessages([]);
     setApprovals([]);
+    setRealtimeContract(null);
+    setMemoryContract(null);
 
     try {
       const created = await requestJson<SessionResponse>("/api/sessions", {
@@ -99,6 +135,7 @@ export default function PersonaBridgeHome() {
 
       const seedMessages = await requestJson<MessageResponse[]>(`/api/sessions/${created.session_id}/messages`);
       setMessages(seedMessages);
+      await refreshContracts(created.session_id);
       await refreshApprovals(created.session_id);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Could not create a session.");
@@ -235,12 +272,50 @@ export default function PersonaBridgeHome() {
         <section className="panel-block">
           <div className="panel-header">
             <span>Memory</span>
-            <strong>{session?.memory_enabled ? "Enabled" : "Off"}</strong>
+            <strong>{memoryContract?.capture_mode.replace("_", " ") ?? "Off"}</strong>
           </div>
           <p>
-            Durable memory is gated by session consent. This scaffold keeps messages in memory until the storage model is
-            added.
+            {memoryContract?.promotion_rule ??
+              "Durable memory is gated by session consent. This scaffold keeps messages in memory until the storage model is added."}
           </p>
+          {memoryContract ? (
+            <dl className="contract-list">
+              <div>
+                <dt>Target</dt>
+                <dd>{memoryContract.storage_target}</dd>
+              </div>
+              <div>
+                <dt>Excluded</dt>
+                <dd>{memoryContract.excluded_sources.length} source types</dd>
+              </div>
+            </dl>
+          ) : null}
+        </section>
+
+        <section className="panel-block">
+          <div className="panel-header">
+            <span>Realtime</span>
+            <strong>{realtimeContract?.status.replace("_", " ") ?? "Not started"}</strong>
+          </div>
+          <p>{realtimeContract?.memory_boundary ?? "Voice/video joins the same session boundary after the room contract exists."}</p>
+          {realtimeContract ? (
+            <dl className="contract-list">
+              <div>
+                <dt>Room</dt>
+                <dd>{realtimeContract.room_id}</dd>
+              </div>
+              <div>
+                <dt>Events</dt>
+                <dd>
+                  {realtimeContract.client_events.length} client / {realtimeContract.server_events.length} server
+                </dd>
+              </div>
+              <div>
+                <dt>Token</dt>
+                <dd>{realtimeContract.token_endpoint ?? "deferred"}</dd>
+              </div>
+            </dl>
+          ) : null}
         </section>
 
         <section className="panel-block">
