@@ -59,8 +59,8 @@ Memory is opt-in at session creation and remains separate from raw chat storage.
 | Consent source | `memory_enabled` on the session. |
 | Default mode | Disabled. Messages stay session-local unless durable transcript storage is added later. |
 | Enabled mode | The API may create memory candidates, not automatic permanent memories. |
-| Storage target | Future PostgreSQL tables for memory records plus optional pgvector embeddings. |
-| User control | A later task must add list/delete controls before durable memory is enabled by default. |
+| Storage target | Local JSON candidate store for this slice; future PostgreSQL tables plus optional pgvector embeddings. |
+| User control | Active candidates must be listable and deletable before semantic recall is enabled. |
 
 ### Allowed Memory Sources
 
@@ -83,9 +83,25 @@ When `memory_enabled` is false, no memory candidates are created. When it is tru
 
 Memory deletion must remove the user-visible memory record and any matching embedding row. Transcript deletion and memory deletion are separate operations because a transcript may be retained for audit while a derived memory is removed.
 
+## Memory Candidate Slice
+
+The first durable memory implementation creates local reviewable candidates, not permanent recalled memories.
+
+| Field | Current Rule |
+| --- | --- |
+| List endpoint | `GET /api/sessions/{session_id}/memory-candidates` |
+| Delete endpoint | `DELETE /api/memory-candidates/{candidate_id}` |
+| Store | JSON file at `.data/memory-candidates.json` unless `MEMORY_STORE_PATH` is set. |
+| Creation trigger | Final user text submitted through `POST /api/sessions/{session_id}/messages` when session memory consent is enabled. |
+| Source provenance | Each candidate keeps the source message ID and session ID. |
+| Secret handling | Obvious secrets, credentials, one-time codes, and payment identifiers are skipped instead of written as candidates. |
+| Delete behavior | Deletion tombstones the candidate, removes the visible summary text, and keeps a deletion timestamp. |
+
+The API returns only active candidates by default. Deleted tombstones can remain in the local store so a later PostgreSQL migration can preserve audit shape while still removing user-visible memory content.
+
 ## Deferred Implementation
 
 - No realtime provider token is minted yet.
 - No OpenAI Realtime credentials are required yet.
-- No memory rows or embeddings are written yet.
+- No PostgreSQL memory rows, embeddings, or semantic recall are written yet.
 - No tool executes from a realtime event without an approved request ID.

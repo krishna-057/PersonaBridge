@@ -16,6 +16,8 @@ Key topics:
 - Realtime and memory contracts are now explicit before provider integration. This lets the team explain how WebRTC/model events map back into ordered messages, approval requests, and memory candidates.
 - The voice shell proves microphone permission and API-minted room readiness without pretending a managed realtime provider is already connected.
 - The short-lived opaque room token is a replaceable adapter boundary: in production it becomes a signed/provider-issued credential, but the session authority remains in the API.
+- Durable memory starts with reviewable candidates and deletion controls, not embeddings. This proves the privacy workflow before adding semantic recall.
+- The local JSON candidate store is intentionally replaceable by PostgreSQL; the important contract is consent-gated creation, source provenance, secret skipping, and deletion tombstones.
 
 ## Next Scaling Questions
 
@@ -25,3 +27,4 @@ Key topics:
 - Should approvals expire, require re-authentication, or include per-tool scopes?
 - What data should be deleted when a user disables memory?
 - Should memory promotion be synchronous on final transcript events, queued through a worker, or fully user-reviewed?
+- When should deleted memory tombstones be purged from audit storage?

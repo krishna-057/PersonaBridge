@@ -6,8 +6,8 @@ PersonaBridge is a personal AI partner that can chat, join a voice/video room, r
 
 The current implemented slice is a local full-stack scaffold with a provider-neutral voice room shell:
 
-- `apps/web`: Next.js console for starting a personal session, sending chat messages, toggling memory consent, reviewing approval requests, and running a browser voice shell that requests microphone access and mints a scoped room token.
-- `services/api`: FastAPI boundary for sessions, messages, approval decisions, realtime token minting, and read-only realtime/memory contracts.
+- `apps/web`: Next.js console for starting a personal session, sending chat messages, toggling memory consent, reviewing memory candidates, deleting candidates, reviewing approval requests, and running a browser voice shell that requests microphone access and mints a scoped room token.
+- `services/api`: FastAPI boundary for sessions, messages, memory candidate review/deletion, approval decisions, realtime token minting, and read-only realtime/memory contracts.
 - `CONTRACTS.md`: The documented realtime room and memory promotion rules that future provider integrations must satisfy.
 - `scripts/check-workspace.mjs`: dependency-light scaffold validation for the required files and API contract markers.
 
@@ -55,13 +55,19 @@ The web app defaults to `http://localhost:3200` and the API defaults to `http://
 | Read realtime contract | `GET /api/sessions/{session_id}/realtime-contract` | Shows the room, event, token, approval, and memory rules for a future voice session. |
 | Mint realtime room token | `POST /api/sessions/{session_id}/realtime-token` | Issues a five-minute browser join token and promotes the session to `voice_ready`. |
 | Read memory contract | `GET /api/sessions/{session_id}/memory-contract` | Shows consent-derived memory capture mode, allowed sources, excluded sources, and storage target. |
+| List memory candidates | `GET /api/sessions/{session_id}/memory-candidates` | Returns active reviewable memory candidates created from allowed user text. |
+| Delete memory candidate | `DELETE /api/memory-candidates/{candidate_id}` | Tombstones a candidate and removes the user-visible summary. |
 
 ## Intentional Deferrals
 
 - Realtime provider integration is not connected yet; the browser shell stops at microphone capture and a short-lived API-minted room token.
 - OpenAI Realtime API credentials are not required for the scaffold.
-- Durable memory and vector search are deferred until the memory schema and deletion controls are implemented.
+- PostgreSQL memory tables, embeddings, and semantic recall are deferred until the local candidate API proves retention and deletion behavior.
 - Approval decisions are recorded, but no external tools execute yet.
+
+## Local Memory Store
+
+Memory candidates are written to `projects/03-personabridge/.data/memory-candidates.json` by default. Override this with `MEMORY_STORE_PATH` if needed, but keep the path under `K:\AutoPilot_Projects` so automation runs do not place project data on `C:`.
 
 ## Why This Project Matters
 

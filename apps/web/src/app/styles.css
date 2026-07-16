@@ -109,7 +109,7 @@ button:disabled {
 .session-strip {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(180px, 1.5fr) 150px 130px 150px;
+  grid-template-columns: minmax(180px, 1.5fr) 150px 130px 150px 110px;
   padding: 14px;
 }
 
@@ -170,7 +170,8 @@ button:disabled {
 
 .message-row p,
 .panel-block p,
-.approval-row p {
+.approval-row p,
+.memory-candidate-row p {
   line-height: 1.5;
   margin: 6px 0 0;
 }
@@ -218,6 +219,36 @@ button:disabled {
   border-top: 1px solid var(--line);
   margin-top: 12px;
   padding-top: 12px;
+}
+
+.memory-candidate-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.memory-candidate-row {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.memory-candidate-row div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.memory-candidate-row time {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.memory-candidate-row button {
+  background: var(--rose);
+  margin-top: 10px;
+  min-height: 34px;
 }
 
 .approval-row[data-status="pending"] {

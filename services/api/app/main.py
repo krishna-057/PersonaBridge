@@ -1,10 +1,13 @@
+import json
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -105,14 +108,63 @@ class MemoryContractResponse(BaseModel):
     storage_target: str
 
 
+class MemoryCandidateResponse(BaseModel):
+    candidate_id: UUID
+    session_id: UUID
+    source_message_id: UUID
+    source_type: Literal["user_message", "assistant_summary", "approved_tool_outcome"]
+    summary: str
+    status: Literal["active", "deleted"]
+    created_at: datetime
+    deleted_at: datetime | None = None
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+memory_store_setting = os.getenv("MEMORY_STORE_PATH", ".data/memory-candidates.json")
+MEMORY_STORE_PATH = Path(memory_store_setting)
+if not MEMORY_STORE_PATH.is_absolute():
+    MEMORY_STORE_PATH = PROJECT_ROOT / MEMORY_STORE_PATH
+
 sessions: dict[UUID, SessionResponse] = {}
 messages: dict[UUID, list[MessageResponse]] = {}
 approval_requests: dict[UUID, ApprovalRequestResponse] = {}
 realtime_tokens: dict[str, RealtimeTokenResponse] = {}
+memory_candidates: dict[UUID, MemoryCandidateResponse] = {}
 
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def model_as_json_dict(model: BaseModel) -> dict:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(mode="json")
+    return jsonable_encoder(model)
+
+
+def load_memory_candidates() -> None:
+    if not MEMORY_STORE_PATH.exists():
+        return
+
+    try:
+        raw_candidates = json.loads(MEMORY_STORE_PATH.read_text(encoding="utf8"))
+    except (json.JSONDecodeError, OSError):
+        return
+
+    for raw_candidate in raw_candidates:
+        candidate = MemoryCandidateResponse(**raw_candidate)
+        memory_candidates[candidate.candidate_id] = candidate
+
+
+def persist_memory_candidates() -> None:
+    MEMORY_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = [
+        model_as_json_dict(candidate)
+        for candidate in sorted(memory_candidates.values(), key=lambda item: item.created_at)
+    ]
+    tmp_path = MEMORY_STORE_PATH.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf8")
+    tmp_path.replace(MEMORY_STORE_PATH)
 
 
 def require_session(session_id: UUID) -> SessionResponse:
@@ -151,6 +203,51 @@ def append_message(
     return message
 
 
+def should_skip_memory_candidate(content: str) -> bool:
+    normalized = content.lower()
+    excluded_terms = [
+        "password",
+        "passcode",
+        "otp",
+        "one-time code",
+        "token",
+        "api key",
+        "secret",
+        "credit card",
+        "card number",
+        "payment",
+        "ssn",
+    ]
+    return any(term in normalized for term in excluded_terms)
+
+
+def summarize_memory_candidate(content: str) -> str:
+    collapsed = " ".join(content.split())
+    if len(collapsed) <= 180:
+        return collapsed
+    return f"{collapsed[:177]}..."
+
+
+def create_memory_candidate(session: SessionResponse, source_message: MessageResponse) -> MemoryCandidateResponse | None:
+    if not session.memory_enabled or source_message.role != "user":
+        return None
+    if should_skip_memory_candidate(source_message.content):
+        return None
+
+    candidate = MemoryCandidateResponse(
+        candidate_id=uuid4(),
+        session_id=session.session_id,
+        source_message_id=source_message.message_id,
+        source_type="user_message",
+        summary=summarize_memory_candidate(source_message.content),
+        status="active",
+        created_at=now_utc(),
+    )
+    memory_candidates[candidate.candidate_id] = candidate
+    persist_memory_candidates()
+    return candidate
+
+
 def sensitive_tool_for(content: str) -> str | None:
     normalized = content.lower()
     if any(term in normalized for term in ["email", "send", "calendar", "book", "delete", "payment"]):
@@ -177,7 +274,7 @@ def assistant_reply(session: SessionResponse, user_content: str, approval_id: UU
 
     memory_note = "I will not store this beyond the current session."
     if session.memory_enabled:
-        memory_note = "I can use this session as a candidate for future memory once durable memory storage is added."
+        memory_note = "I created reviewable memory candidates only for allowed user text, and you can delete them."
 
     return f"Noted. For now I can help structure the next step and keep the boundary clear. {memory_note}"
 
@@ -243,17 +340,25 @@ def memory_contract_for(session: SessionResponse) -> MemoryContractResponse:
             "browser or device diagnostics",
         ],
         promotion_rule=(
-            "Create memory candidates only when consent is enabled; a future worker must classify, redact, "
-            "and attach provenance before durable storage."
+            "Create reviewable memory candidates only when consent is enabled; skip obvious secrets and keep "
+            "source-message provenance for later classification."
         ),
-        deletion_rule="Delete user-visible memory records and matching embedding rows together.",
-        storage_target="future PostgreSQL memory tables plus optional pgvector embeddings",
+        deletion_rule="Delete controls tombstone the local candidate and remove user-visible summary text.",
+        storage_target=f"local JSON candidate store at {MEMORY_STORE_PATH}",
     )
+
+
+load_memory_candidates()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "storage": "memory", "model_runtime": "stubbed"}
+    return {
+        "status": "ok",
+        "storage": "memory",
+        "memory_candidates": "file",
+        "model_runtime": "stubbed",
+    }
 
 
 @app.post("/api/sessions", response_model=SessionResponse)
@@ -301,6 +406,39 @@ def get_memory_contract(session_id: UUID) -> MemoryContractResponse:
     return memory_contract_for(session)
 
 
+@app.get("/api/sessions/{session_id}/memory-candidates", response_model=list[MemoryCandidateResponse])
+def list_memory_candidates(
+    session_id: UUID,
+    include_deleted: bool = Query(default=False),
+) -> list[MemoryCandidateResponse]:
+    require_session(session_id)
+    candidates = [
+        candidate
+        for candidate in memory_candidates.values()
+        if candidate.session_id == session_id and (include_deleted or candidate.status == "active")
+    ]
+    return sorted(candidates, key=lambda candidate: candidate.created_at)
+
+
+@app.delete("/api/memory-candidates/{candidate_id}", response_model=MemoryCandidateResponse)
+def delete_memory_candidate(candidate_id: UUID) -> MemoryCandidateResponse:
+    candidate = memory_candidates.get(candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Memory candidate not found.")
+
+    if candidate.status == "deleted":
+        return candidate
+
+    if hasattr(candidate, "model_copy"):
+        updated = candidate.model_copy(update={"status": "deleted", "summary": "[deleted]", "deleted_at": now_utc()})
+    else:
+        updated = candidate.copy(update={"status": "deleted", "summary": "[deleted]", "deleted_at": now_utc()})
+
+    memory_candidates[candidate_id] = updated
+    persist_memory_candidates()
+    return updated
+
+
 @app.get("/api/sessions/{session_id}/messages", response_model=list[MessageResponse])
 def list_messages(session_id: UUID) -> list[MessageResponse]:
     require_session(session_id)
@@ -313,7 +451,8 @@ def send_message(session_id: UUID, payload: SendMessageRequest) -> list[MessageR
     if session.status == "ended":
         raise HTTPException(status_code=409, detail="Session has ended.")
 
-    append_message(session_id, "user", payload.content)
+    user_message = append_message(session_id, "user", payload.content)
+    create_memory_candidate(session, user_message)
     approval_request_id = None
     if sensitive_tool_for(payload.content):
         approval_request_id = create_approval_request(session_id, payload.content).request_id

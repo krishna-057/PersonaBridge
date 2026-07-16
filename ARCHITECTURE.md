@@ -14,6 +14,7 @@ FastAPI session API
   +--> approval request queue
   +--> realtime and memory contract views
   +--> short-lived browser room tokens
+  +--> local durable memory candidate store
   +--> future realtime/model adapters
 ```
 
@@ -21,14 +22,14 @@ FastAPI session API
 
 | Component | Responsibility |
 | --- | --- |
-| `apps/web` | Provides the operator-facing chat console, memory consent control, approval queue, and browser microphone room shell. |
-| `services/api` | Owns session state, message append flow, approval decisions, read-only contract descriptions, and short-lived room token minting. |
+| `apps/web` | Provides the operator-facing chat console, memory consent control, memory candidate review/deletion, approval queue, and browser microphone room shell. |
+| `services/api` | Owns session state, message append flow, memory candidate creation/deletion, approval decisions, read-only contract descriptions, and short-lived room token minting. |
 | `CONTRACTS.md` | Defines the realtime room and memory rules that provider/storage integrations must satisfy. |
 | `scripts/check-workspace.mjs` | Verifies the scaffold and expected contract markers without requiring external services. |
 
 ## State Boundaries
 
-The initial API stores sessions, messages, and approval requests in process memory. This is deliberate for the scaffold because it keeps the first workflow runnable without database setup. It also makes the eventual persistence task clearer: move the same three resources into PostgreSQL with an explicit memory-retention policy.
+The initial API stores sessions, messages, and approval requests in process memory. This is deliberate for the scaffold because it keeps the first workflow runnable without database setup. Memory candidates are the first durable resource: they are written to a local JSON file under `projects/03-personabridge/.data/` by default. That gives the deletion workflow a real persisted record without introducing PostgreSQL before the retention rules are visible.
 
 ## Realtime Boundary
 
@@ -52,7 +53,9 @@ Memory consent controls whether a session may produce memory candidates. It does
 
 When memory is disabled, chat remains session-local in the current implementation. When memory is enabled, future storage may create candidate memories from final user text, assistant summaries, and approved rememberable tool outcomes. Raw audio/video, rejected approvals, secrets, one-time credentials, and device diagnostics remain excluded.
 
-The next durable memory task should add explicit storage tables and deletion controls before any automatic long-term recall is enabled.
+The durable memory candidate slice creates reviewable records only from allowed user-authored final text while memory consent is enabled. Candidate deletion tombstones the record and removes the visible summary, preserving enough audit shape for later storage migration without retaining the deleted memory text.
+
+PostgreSQL and pgvector remain the intended long-term storage path. The local file store is a replaceable adapter for the first deletion workflow, not the final recall architecture.
 
 ## Permission Boundary
 

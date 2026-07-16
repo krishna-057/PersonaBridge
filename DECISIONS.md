@@ -73,3 +73,25 @@ Rejected alternatives:
 - Add a managed realtime SDK first. Rejected because provider setup would hide the basic room readiness and browser permission flow.
 - Let the browser invent a room identity without an API token. Rejected because realtime access should stay tied to validated session state.
 - Store microphone audio in the API while testing. Rejected because raw audio is explicitly excluded from the memory contract.
+
+## Decision 5: Add Local Durable Memory Candidates Before PostgreSQL Recall
+
+Status: accepted.
+
+PersonaBridge now writes reviewable memory candidates to a local JSON file under the project `.data` directory instead of adding PostgreSQL and pgvector immediately.
+
+Why:
+
+- The next architectural risk is user control over what gets remembered, especially deletion, not vector search quality.
+- A local durable file proves candidates survive API restarts without introducing database setup before the retention workflow is visible.
+- The API shape still keeps source-message provenance and deletion semantics that can move to PostgreSQL later.
+
+Tradeoff:
+
+- Sessions and transcripts remain in process memory, so this is not a production persistence model. It is a deliberate local durability step for memory candidate review and deletion.
+
+Rejected alternatives:
+
+- Add pgvector and semantic recall immediately. Rejected because recall before deletion controls would make the privacy story weaker.
+- Store every memory-enabled message as a permanent memory. Rejected because consent allows candidate creation, not automatic long-term recall.
+- Physically delete candidate rows without a tombstone. Rejected because the system still needs an auditable deletion state while removing the user-visible memory text.

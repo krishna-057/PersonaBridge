@@ -69,6 +69,17 @@ type MemoryContract = {
   storage_target: string;
 };
 
+type MemoryCandidate = {
+  candidate_id: string;
+  session_id: string;
+  source_message_id: string;
+  source_type: "user_message" | "assistant_summary" | "approved_tool_outcome";
+  summary: string;
+  status: "active" | "deleted";
+  created_at: string;
+  deleted_at: string | null;
+};
+
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8200").replace(/\/$/, "");
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -101,6 +112,7 @@ export default function PersonaBridgeHome() {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [realtimeContract, setRealtimeContract] = useState<RealtimeContract | null>(null);
   const [memoryContract, setMemoryContract] = useState<MemoryContract | null>(null);
+  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
   const [roomToken, setRoomToken] = useState<RealtimeToken | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [draft, setDraft] = useState("Help me plan a focused architecture study block.");
@@ -136,10 +148,18 @@ export default function PersonaBridgeHome() {
     setApprovals(nextApprovals);
   }, []);
 
+  const refreshMemoryCandidates = useCallback(async (targetSessionId: string) => {
+    const nextCandidates = await requestJson<MemoryCandidate[]>(
+      `/api/sessions/${targetSessionId}/memory-candidates`
+    );
+    setMemoryCandidates(nextCandidates);
+  }, []);
+
   async function createSession() {
     setStatusMessage("Creating session...");
     setMessages([]);
     setApprovals([]);
+    setMemoryCandidates([]);
     setRealtimeContract(null);
     setMemoryContract(null);
     setRoomToken(null);
@@ -161,6 +181,7 @@ export default function PersonaBridgeHome() {
       setMessages(seedMessages);
       await refreshContracts(created.session_id);
       await refreshApprovals(created.session_id);
+      await refreshMemoryCandidates(created.session_id);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Could not create a session.");
     }
@@ -225,6 +246,7 @@ export default function PersonaBridgeHome() {
       setMessages(nextMessages);
       setDraft("");
       await refreshApprovals(sessionId);
+      await refreshMemoryCandidates(sessionId);
       setStatusMessage("Assistant response received.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Could not send the message.");
@@ -248,6 +270,23 @@ export default function PersonaBridgeHome() {
       setStatusMessage("Approval queue updated.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Could not update the approval.");
+    }
+  }
+
+  async function deleteMemoryCandidate(candidateId: string) {
+    if (!sessionId) {
+      return;
+    }
+
+    setStatusMessage("Deleting memory candidate...");
+    try {
+      await requestJson<MemoryCandidate>(`/api/memory-candidates/${candidateId}`, {
+        method: "DELETE"
+      });
+      await refreshMemoryCandidates(sessionId);
+      setStatusMessage("Memory candidate deleted.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not delete the memory candidate.");
     }
   }
 
@@ -309,6 +348,10 @@ export default function PersonaBridgeHome() {
             <span>Pending approvals</span>
             <strong>{pendingApprovals.length}</strong>
           </div>
+          <div>
+            <span>Memories</span>
+            <strong>{memoryCandidates.length}</strong>
+          </div>
         </div>
 
         <div className="message-list" aria-label="Messages">
@@ -342,7 +385,9 @@ export default function PersonaBridgeHome() {
         <section className="panel-block">
           <div className="panel-header">
             <span>Memory</span>
-            <strong>{memoryContract?.capture_mode.replace("_", " ") ?? "Off"}</strong>
+            <strong>
+              {memoryContract?.capture_mode.replace("_", " ") ?? "Off"} / {memoryCandidates.length}
+            </strong>
           </div>
           <p>
             {memoryContract?.promotion_rule ??
@@ -360,6 +405,21 @@ export default function PersonaBridgeHome() {
               </div>
             </dl>
           ) : null}
+          <div className="memory-candidate-list" aria-label="Memory candidates">
+            {memoryCandidates.length === 0 ? <p className="empty-state">No active memory candidates.</p> : null}
+            {memoryCandidates.map((candidate) => (
+              <article className="memory-candidate-row" key={candidate.candidate_id}>
+                <div>
+                  <strong>{candidate.source_type.replace("_", " ")}</strong>
+                  <time>{formatClock(candidate.created_at)}</time>
+                </div>
+                <p>{candidate.summary}</p>
+                <button type="button" onClick={() => deleteMemoryCandidate(candidate.candidate_id)}>
+                  Delete
+                </button>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className="panel-block">
