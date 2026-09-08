@@ -1,6 +1,6 @@
 # PersonaBridge Realtime And Memory Contracts
 
-This document defines the next PersonaBridge boundary before any realtime model SDK, managed room provider, durable memory store, or tool executor is added. The goal is to keep the first realtime slice compatible with the existing chat, consent, and approval workflow instead of creating a parallel voice-only path.
+This document defines PersonaBridge's provider-neutral boundaries for realtime sessions, memory, and tool approvals. These contracts keep future provider integrations compatible with the existing chat, consent, and approval workflow instead of creating a parallel voice-only path.
 
 ## Realtime Session Contract
 
@@ -99,9 +99,9 @@ The first durable memory implementation creates local reviewable candidates, not
 
 The API returns only active candidates by default. Deleted tombstones can remain in the local store so a later PostgreSQL migration can preserve audit shape while still removing user-visible memory content.
 
-## Deferred Implementation
+## Deferred Integrations
 
-- No realtime provider token is minted yet.
-- No OpenAI Realtime credentials are required yet.
+- The API mints a local opaque room token; no external realtime provider credential is issued yet.
+- No OpenAI or other model-provider credentials are required.
 - No PostgreSQL memory rows, embeddings, or semantic recall are written yet.
-- No tool executes from a realtime event without an approved request ID.
+- Approval decisions are recorded, but no external tool executor is connected yet.

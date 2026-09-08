@@ -1,74 +1,95 @@
 # PersonaBridge
 
-PersonaBridge is a personal AI partner that can chat, join a voice/video room, remember user preferences, and request approval before sensitive actions.
+PersonaBridge is a full-stack prototype for consent-aware AI conversations. It demonstrates how chat, reviewable memory, short-lived voice-room access, and approval-gated actions can share one session boundary without exposing provider credentials to the browser.
 
-## Current Slice
+## What Works
 
-The current implemented slice is a local full-stack scaffold with a provider-neutral voice room shell:
+- Create isolated personal sessions with memory disabled by default.
+- Send chat messages through a Next.js client and FastAPI service.
+- Create, list, and delete persisted memory candidates when the user opts in.
+- Detect sensitive-action intent and require an explicit approve or reject decision.
+- Request browser microphone access and mint a five-minute, session-scoped room token.
+- Inspect the realtime and memory contracts exposed by the API.
 
-- `apps/web`: Next.js console for starting a personal session, sending chat messages, toggling memory consent, reviewing memory candidates, deleting candidates, reviewing approval requests, and running a browser voice shell that requests microphone access and mints a scoped room token.
-- `services/api`: FastAPI boundary for sessions, messages, memory candidate review/deletion, approval decisions, realtime token minting, and read-only realtime/memory contracts.
-- `CONTRACTS.md`: The documented realtime room and memory promotion rules that future provider integrations must satisfy.
-- `scripts/check-workspace.mjs`: dependency-light scaffold validation for the required files and API contract markers.
+The assistant response and room token are local stubs. The project focuses on the application boundaries around an AI provider; it does not claim to provide a production model or WebRTC integration.
 
-The assistant response is intentionally stubbed. It proves the user-facing workflow, permission boundary, and realtime/memory contract shape before adding external model credentials, managed realtime media, or durable memory.
+## Architecture
 
-## Architecture Focus
-
-- Realtime AI conversation
-- Voice/video transport
-- Long-term memory
-- Permission-gated tools
-- Human-in-the-loop workflows
-
-## Proposed Stack
-
-| Layer | Choice | Why |
-| --- | --- | --- |
-| Frontend | Next.js | Fast full-stack product UI and routing. |
-| Realtime media | LiveKit or WebRTC | Better fit for low-latency audio/video than plain HTTP. |
-| AI | OpenAI Realtime API | Natural voice interaction and low-latency model responses. |
-| Memory | PostgreSQL + pgvector | Combines durable relational data with semantic retrieval. |
-| Coordination | Redis | Useful for session state and lightweight queues. |
-
-## Local Development
-
-```powershell
-cd projects\03-personabridge
-npm install
-npm run dev:web
-python -m uvicorn services.api.app.main:app --reload --port 8200
+```text
+Next.js web console (localhost:3200)
+              |
+              | REST/JSON
+              v
+FastAPI service (localhost:8200)
+  |-- in-memory sessions, transcripts, and approvals
+  |-- JSON-backed reviewable memory candidates
+  `-- provider-neutral realtime room contract
 ```
 
-The web app defaults to `http://localhost:3200` and the API defaults to `http://localhost:8200`.
+The API owns session state and permission decisions. The browser owns microphone permission and never receives server credentials. Memory consent permits candidate creation, not automatic permanent retention.
 
-## First API Contract
+See [ARCHITECTURE.md](ARCHITECTURE.md) for component boundaries, [CONTRACTS.md](CONTRACTS.md) for API and lifecycle rules, and [DECISIONS.md](DECISIONS.md) for design tradeoffs.
 
-| Capability | Endpoint | Purpose |
+## Tech Stack
+
+- Next.js 16, React 19, and TypeScript
+- Python 3.10+ and FastAPI
+- Browser MediaDevices API
+- Local JSON persistence for reviewable memory candidates
+
+## Run Locally
+
+Prerequisites: Node.js 20.9+ and Python 3.10+.
+
+```powershell
+npm install
+python -m pip install -r services/api/requirements.txt
+```
+
+Start the API and web app in separate terminals:
+
+```powershell
+npm run dev:api
+npm run dev:web
+```
+
+Open `http://localhost:3200`. The API documentation is available at `http://localhost:8200/docs`.
+The checked-in defaults work without environment configuration; `.env.example` lists the available overrides.
+
+## Quick Demo
+
+1. Enable **Memory consent**, enter a name, and start a session.
+2. Send a normal message and confirm that a reviewable memory candidate appears.
+3. Delete the candidate and confirm that it disappears from the active list.
+4. Send a message such as `Please email this plan` and approve or reject the generated action request.
+5. Select **Join Voice**, grant microphone access, and inspect the short-lived room token metadata.
+
+Local memory data is written to `.data/memory-candidates.json`. Set `MEMORY_STORE_PATH` to override that location.
+
+## API Surface
+
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
-| Create session | `POST /api/sessions` | Starts a personal room with memory consent captured up front. |
-| Read session | `GET /api/sessions/{session_id}` | Returns session state for the web console. |
-| List messages | `GET /api/sessions/{session_id}/messages` | Shows the current conversation transcript. |
-| Send message | `POST /api/sessions/{session_id}/messages` | Adds a user message and stubbed assistant response. |
-| List approvals | `GET /api/sessions/{session_id}/approvals` | Shows pending external-action requests. |
-| Decide approval | `POST /api/approvals/{request_id}/decision` | Records approve/reject before any future tool execution. |
-| Read realtime contract | `GET /api/sessions/{session_id}/realtime-contract` | Shows the room, event, token, approval, and memory rules for a future voice session. |
-| Mint realtime room token | `POST /api/sessions/{session_id}/realtime-token` | Issues a five-minute browser join token and promotes the session to `voice_ready`. |
-| Read memory contract | `GET /api/sessions/{session_id}/memory-contract` | Shows consent-derived memory capture mode, allowed sources, excluded sources, and storage target. |
-| List memory candidates | `GET /api/sessions/{session_id}/memory-candidates` | Returns active reviewable memory candidates created from allowed user text. |
-| Delete memory candidate | `DELETE /api/memory-candidates/{candidate_id}` | Tombstones a candidate and removes the user-visible summary. |
+| `POST` | `/api/sessions` | Create a session and record memory consent. |
+| `GET` | `/api/sessions/{session_id}` | Read session state. |
+| `GET`, `POST` | `/api/sessions/{session_id}/messages` | Read or append conversation messages. |
+| `GET` | `/api/sessions/{session_id}/approvals` | List action approval requests. |
+| `POST` | `/api/approvals/{request_id}/decision` | Approve or reject an action request. |
+| `GET` | `/api/sessions/{session_id}/memory-candidates` | List active memory candidates. |
+| `DELETE` | `/api/memory-candidates/{candidate_id}` | Tombstone a memory candidate. |
+| `GET` | `/api/sessions/{session_id}/realtime-contract` | Read the realtime integration contract. |
+| `POST` | `/api/sessions/{session_id}/realtime-token` | Mint a short-lived local room token. |
 
-## Intentional Deferrals
+## Validate
 
-- Realtime provider integration is not connected yet; the browser shell stops at microphone capture and a short-lived API-minted room token.
-- OpenAI Realtime API credentials are not required for the scaffold.
-- PostgreSQL memory tables, embeddings, and semantic recall are deferred until the local candidate API proves retention and deletion behavior.
-- Approval decisions are recorded, but no external tools execute yet.
+```powershell
+npm run check
+npm run build -w @personabridge/web
+python -m compileall services/api/app
+```
 
-## Local Memory Store
+## Current Limitations
 
-Memory candidates are written to `projects/03-personabridge/.data/memory-candidates.json` by default. Override this with `MEMORY_STORE_PATH` if needed, but keep the path under `K:\AutoPilot_Projects` so automation runs do not place project data on `C:`.
-
-## Why This Project Matters
-
-This project is modern and interview-relevant because it involves AI product design, realtime systems, memory, and permission boundaries.
+- Sessions, transcripts, approvals, and room tokens reset when the API restarts.
+- The local room token is an architecture boundary, not production authentication.
+- No external language model, WebRTC provider, tool executor, PostgreSQL database, or vector search is connected yet.

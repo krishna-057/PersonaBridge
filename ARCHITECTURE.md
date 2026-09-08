@@ -1,6 +1,6 @@
 # PersonaBridge Architecture
 
-PersonaBridge starts as a modular full-stack app with a thin web console and a FastAPI backend. The first slice focuses on the contract between a personal session, messages, memory consent, and approval-gated actions.
+PersonaBridge is a modular full-stack prototype with a thin web console and a FastAPI backend. It focuses on the contract between a personal session, messages, memory consent, and approval-gated actions.
 
 ```text
 Next.js web console
@@ -25,11 +25,11 @@ FastAPI session API
 | `apps/web` | Provides the operator-facing chat console, memory consent control, memory candidate review/deletion, approval queue, and browser microphone room shell. |
 | `services/api` | Owns session state, message append flow, memory candidate creation/deletion, approval decisions, read-only contract descriptions, and short-lived room token minting. |
 | `CONTRACTS.md` | Defines the realtime room and memory rules that provider/storage integrations must satisfy. |
-| `scripts/check-workspace.mjs` | Verifies the scaffold and expected contract markers without requiring external services. |
+| `scripts/check-workspace.mjs` | Verifies the workspace and expected contract markers without requiring external services. |
 
 ## State Boundaries
 
-The initial API stores sessions, messages, and approval requests in process memory. This is deliberate for the scaffold because it keeps the first workflow runnable without database setup. Memory candidates are the first durable resource: they are written to a local JSON file under `projects/03-personabridge/.data/` by default. That gives the deletion workflow a real persisted record without introducing PostgreSQL before the retention rules are visible.
+The API stores sessions, messages, and approval requests in process memory. This keeps the workflow runnable without database setup. Memory candidates are the first durable resource: they are written to a local JSON file under `.data/` by default. That gives the deletion workflow a persisted record without introducing PostgreSQL before the retention rules are visible.
 
 ## Realtime Boundary
 
