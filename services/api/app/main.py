@@ -11,6 +11,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .storage import store
+
 
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
@@ -26,6 +28,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 class CreateSessionRequest(BaseModel):
@@ -142,7 +154,19 @@ def model_as_json_dict(model: BaseModel) -> dict:
     return jsonable_encoder(model)
 
 
+def stored_model(table: str, model: BaseModel) -> None:
+    store.request("POST", table, payload=model_as_json_dict(model))
+
+
+def stored_rows(table: str, **filters: str) -> list[dict]:
+    params = {key: f"eq.{value}" for key, value in filters.items()}
+    params["select"] = "*"
+    return store.request("GET", table, params=params)
+
+
 def load_memory_candidates() -> None:
+    if store.enabled:
+        return
     if not MEMORY_STORE_PATH.exists():
         return
 
@@ -157,6 +181,8 @@ def load_memory_candidates() -> None:
 
 
 def persist_memory_candidates() -> None:
+    if store.enabled:
+        return
     MEMORY_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = [
         model_as_json_dict(candidate)
@@ -168,6 +194,12 @@ def persist_memory_candidates() -> None:
 
 
 def require_session(session_id: UUID) -> SessionResponse:
+    if store.enabled:
+        rows = stored_rows("sessions", session_id=str(session_id))
+        if not rows:
+            raise HTTPException(status_code=404, detail="Session not found.")
+        return SessionResponse(**rows[0])
+
     session = sessions.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
@@ -175,6 +207,15 @@ def require_session(session_id: UUID) -> SessionResponse:
 
 
 def store_session(session: SessionResponse) -> SessionResponse:
+    if store.enabled:
+        store.request(
+            "POST",
+            "sessions",
+            payload=model_as_json_dict(session),
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+        return session
+
     sessions[session.session_id] = session
     return session
 
@@ -199,6 +240,10 @@ def append_message(
         created_at=now_utc(),
         approval_request_id=approval_request_id,
     )
+    if store.enabled:
+        stored_model("messages", message)
+        return message
+
     messages[session_id].append(message)
     return message
 
@@ -243,6 +288,10 @@ def create_memory_candidate(session: SessionResponse, source_message: MessageRes
         status="active",
         created_at=now_utc(),
     )
+    if store.enabled:
+        stored_model("memory_candidates", candidate)
+        return candidate
+
     memory_candidates[candidate.candidate_id] = candidate
     persist_memory_candidates()
     return candidate
@@ -264,6 +313,10 @@ def create_approval_request(session_id: UUID, content: str) -> ApprovalRequestRe
         status="pending",
         created_at=now_utc(),
     )
+    if store.enabled:
+        stored_model("approval_requests", request)
+        return request
+
     approval_requests[request.request_id] = request
     return request
 
@@ -343,8 +396,8 @@ def memory_contract_for(session: SessionResponse) -> MemoryContractResponse:
             "Create reviewable memory candidates only when consent is enabled; skip obvious secrets and keep "
             "source-message provenance for later classification."
         ),
-        deletion_rule="Delete controls tombstone the local candidate and remove user-visible summary text.",
-        storage_target=f"local JSON candidate store at {MEMORY_STORE_PATH}",
+        deletion_rule="Delete controls tombstone the candidate and remove user-visible summary text.",
+        storage_target=("private Supabase tables behind the API" if store.enabled else f"local JSON candidate store at {MEMORY_STORE_PATH}"),
     )
 
 
@@ -355,8 +408,8 @@ load_memory_candidates()
 def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "storage": "memory",
-        "memory_candidates": "file",
+        "storage": "supabase" if store.enabled else "memory",
+        "memory_candidates": "supabase" if store.enabled else "file",
         "model_runtime": "stubbed",
     }
 
@@ -371,8 +424,9 @@ def create_session(payload: CreateSessionRequest) -> SessionResponse:
         memory_enabled=payload.memory_enabled,
         created_at=now_utc(),
     )
-    sessions[session_id] = session
-    messages[session_id] = []
+    store_session(session)
+    if not store.enabled:
+        messages[session_id] = []
     append_message(
         session_id,
         "system",
@@ -412,16 +466,37 @@ def list_memory_candidates(
     include_deleted: bool = Query(default=False),
 ) -> list[MemoryCandidateResponse]:
     require_session(session_id)
-    candidates = [
-        candidate
-        for candidate in memory_candidates.values()
-        if candidate.session_id == session_id and (include_deleted or candidate.status == "active")
-    ]
+    if store.enabled:
+        params = {
+            "select": "*",
+            "session_id": f"eq.{session_id}",
+            "order": "created_at.asc",
+        }
+        if not include_deleted:
+            params["status"] = "eq.active"
+        return [MemoryCandidateResponse(**row) for row in store.request("GET", "memory_candidates", params=params)]
+
+    candidates = [candidate for candidate in memory_candidates.values() if candidate.session_id == session_id and (include_deleted or candidate.status == "active")]
     return sorted(candidates, key=lambda candidate: candidate.created_at)
 
 
 @app.delete("/api/memory-candidates/{candidate_id}", response_model=MemoryCandidateResponse)
 def delete_memory_candidate(candidate_id: UUID) -> MemoryCandidateResponse:
+    if store.enabled:
+        rows = stored_rows("memory_candidates", candidate_id=str(candidate_id))
+        if not rows:
+            raise HTTPException(status_code=404, detail="Memory candidate not found.")
+        candidate = MemoryCandidateResponse(**rows[0])
+        if candidate.status == "deleted":
+            return candidate
+        updated_rows = store.request(
+            "PATCH",
+            "memory_candidates",
+            params={"candidate_id": f"eq.{candidate_id}"},
+            payload={"status": "deleted", "summary": "[deleted]", "deleted_at": now_utc().isoformat()},
+        )
+        return MemoryCandidateResponse(**updated_rows[0])
+
     candidate = memory_candidates.get(candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="Memory candidate not found.")
@@ -442,6 +517,13 @@ def delete_memory_candidate(candidate_id: UUID) -> MemoryCandidateResponse:
 @app.get("/api/sessions/{session_id}/messages", response_model=list[MessageResponse])
 def list_messages(session_id: UUID) -> list[MessageResponse]:
     require_session(session_id)
+    if store.enabled:
+        rows = store.request(
+            "GET",
+            "messages",
+            params={"select": "*", "session_id": f"eq.{session_id}", "order": "created_at.asc"},
+        )
+        return [MessageResponse(**row) for row in rows]
     return messages[session_id]
 
 
@@ -463,12 +545,19 @@ def send_message(session_id: UUID, payload: SendMessageRequest) -> list[MessageR
         assistant_reply(session, payload.content, approval_request_id),
         approval_request_id=approval_request_id,
     )
-    return messages[session_id]
+    return list_messages(session_id)
 
 
 @app.get("/api/sessions/{session_id}/approvals", response_model=list[ApprovalRequestResponse])
 def list_approvals(session_id: UUID) -> list[ApprovalRequestResponse]:
     require_session(session_id)
+    if store.enabled:
+        rows = store.request(
+            "GET",
+            "approval_requests",
+            params={"select": "*", "session_id": f"eq.{session_id}", "order": "created_at.asc"},
+        )
+        return [ApprovalRequestResponse(**row) for row in rows]
     return [
         request
         for request in approval_requests.values()
@@ -478,6 +567,21 @@ def list_approvals(session_id: UUID) -> list[ApprovalRequestResponse]:
 
 @app.post("/api/approvals/{request_id}/decision", response_model=ApprovalRequestResponse)
 def decide_approval(request_id: UUID, payload: ApprovalDecisionRequest) -> ApprovalRequestResponse:
+    if store.enabled:
+        rows = stored_rows("approval_requests", request_id=str(request_id))
+        if not rows:
+            raise HTTPException(status_code=404, detail="Approval request not found.")
+        request = ApprovalRequestResponse(**rows[0])
+        if request.status != "pending":
+            raise HTTPException(status_code=409, detail="Approval request already decided.")
+        updated_rows = store.request(
+            "PATCH",
+            "approval_requests",
+            params={"request_id": f"eq.{request_id}"},
+            payload={"status": payload.decision, "decided_at": now_utc().isoformat()},
+        )
+        return ApprovalRequestResponse(**updated_rows[0])
+
     request = approval_requests.get(request_id)
     if request is None:
         raise HTTPException(status_code=404, detail="Approval request not found.")

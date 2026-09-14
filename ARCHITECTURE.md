@@ -29,7 +29,7 @@ FastAPI session API
 
 ## State Boundaries
 
-The API stores sessions, messages, and approval requests in process memory. This keeps the workflow runnable without database setup. Memory candidates are the first durable resource: they are written to a local JSON file under `.data/` by default. That gives the deletion workflow a persisted record without introducing PostgreSQL before the retention rules are visible.
+Local development stores sessions, messages, and approval requests in process memory and memory candidates in `.data/`. When Supabase environment variables are present, the API instead persists all four resources through Supabase PostgREST. Row-level security blocks browser clients; the service-role credential exists only in the API runtime.
 
 ## Realtime Boundary
 

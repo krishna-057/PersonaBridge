@@ -90,6 +90,15 @@ Tradeoff:
 
 - Sessions and transcripts remain in process memory, so this is not a production persistence model. It is a deliberate local durability step for memory candidate review and deletion.
 
+## 2026-09-14: Use a server-only Supabase persistence adapter for Vercel
+
+PersonaBridge keeps the zero-setup local store but switches to Supabase when server-side credentials are configured. Vercel hosts the web and API as separate projects from the same monorepo.
+
+- RLS is enabled with no public policies; browser clients cannot query the tables directly.
+- The service-role key is restricted to the FastAPI environment and is never exposed through `NEXT_PUBLIC_*` variables.
+- The API URL is the only deployment value exposed to the browser.
+- This avoids unreliable function memory and filesystem writes while preserving the existing REST contract.
+
 Rejected alternatives:
 
 - Add pgvector and semantic recall immediately. Rejected because recall before deletion controls would make the privacy story weaker.

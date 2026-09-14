@@ -80,7 +80,7 @@ type MemoryCandidate = {
   deleted_at: string | null;
 };
 
-const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8200").replace(/\/$/, "");
+const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -500,7 +500,7 @@ export default function PersonaBridgeHome() {
         <section className="panel-block">
           <div className="panel-header">
             <span>Runtime</span>
-            <strong>{apiBaseUrl}</strong>
+            <strong>{apiBaseUrl || "same origin"}</strong>
           </div>
           <p>{statusMessage}</p>
         </section>

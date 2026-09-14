@@ -66,6 +66,8 @@ The checked-in defaults work without environment configuration; `.env.example` l
 
 Local memory data is written to `.data/memory-candidates.json`. Set `MEMORY_STORE_PATH` to override that location.
 
+For a hosted portfolio deployment, the API uses private Supabase tables when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured. See [DEPLOYMENT.md](DEPLOYMENT.md). The service-role key is backend-only and must never use a `NEXT_PUBLIC_` prefix.
+
 ## API Surface
 
 | Method | Endpoint | Purpose |
@@ -90,6 +92,7 @@ python -m compileall services/api/app
 
 ## Current Limitations
 
-- Sessions, transcripts, approvals, and room tokens reset when the API restarts.
+- In local mode, sessions, transcripts, approvals, and room tokens reset when the API restarts.
+- In a configured Vercel deployment, sessions, transcripts, approvals, and memory candidates persist in Supabase; only room tokens remain ephemeral.
 - The local room token is an architecture boundary, not production authentication.
 - No external language model, WebRTC provider, tool executor, PostgreSQL database, or vector search is connected yet.
