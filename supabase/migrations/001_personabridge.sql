@@ -58,3 +58,8 @@ revoke all on public.sessions from anon, authenticated;
 revoke all on public.messages from anon, authenticated;
 revoke all on public.approval_requests from anon, authenticated;
 revoke all on public.memory_candidates from anon, authenticated;
+
+grant select, insert, update, delete on public.sessions to service_role;
+grant select, insert, update, delete on public.messages to service_role;
+grant select, insert, update, delete on public.approval_requests to service_role;
+grant select, insert, update, delete on public.memory_candidates to service_role;
