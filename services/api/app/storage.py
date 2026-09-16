@@ -25,17 +25,20 @@ class SupabaseStore:
         if not self.enabled:
             raise RuntimeError("Supabase storage is not configured.")
 
+        headers = {
+            "apikey": self.service_key,
+            "Content-Type": "application/json",
+            "Prefer": prefer,
+        }
+        if not self.service_key.startswith("sb_secret_"):
+            headers["Authorization"] = f"Bearer {self.service_key}"
+
         response = httpx.request(
             method,
             f"{self.url}/rest/v1/{table}",
             params=params,
             json=payload,
-            headers={
-                "apikey": self.service_key,
-                "Authorization": f"Bearer {self.service_key}",
-                "Content-Type": "application/json",
-                "Prefer": prefer,
-            },
+            headers=headers,
             timeout=10,
         )
         response.raise_for_status()
